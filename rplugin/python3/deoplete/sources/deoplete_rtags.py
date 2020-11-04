@@ -1,7 +1,7 @@
 import re
 import json
 from pprint import pprint
-from subprocess import Popen, PIPE
+from subprocess import Popen, PIPE, TimeoutExpired
 
 from deoplete.source.base import Base
 
@@ -35,8 +35,11 @@ class Source(Base):
         text = "\n".join(buf)
 
         command = self.get_rc_command(buf_name, line, col, len(text))
-        p = Popen(command, stdout=PIPE, stdin=PIPE, stderr=PIPE)
-        stdout_data, stderr_data = p.communicate(input=text.encode("utf-8"))
+        try:
+            p = Popen(command, stdout=PIPE, stdin=PIPE, stderr=PIPE)
+            stdout_data, stderr_data = p.communicate(input=text.encode("utf-8"), timeout=2)
+        except TimeoutExpired:
+            return []
 
         stdout_data_decoded = stdout_data.decode("utf-8", 'ignore')  
         if stdout_data_decoded == "":

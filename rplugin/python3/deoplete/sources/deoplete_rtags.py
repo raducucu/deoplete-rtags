@@ -38,7 +38,7 @@ class Source(Base):
         try:
             p = Popen(command, stdout=PIPE, stdin=PIPE, stderr=PIPE)
             stdout_data, stderr_data = p.communicate(input=text.encode("utf-8"), timeout=2)
-        except TimeoutExpired:
+        finally:
             return []
 
         stdout_data_decoded = stdout_data.decode("utf-8", 'ignore')  

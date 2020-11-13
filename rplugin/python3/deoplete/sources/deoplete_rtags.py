@@ -20,6 +20,7 @@ class Source(Base):
         self.input_pattern = (r'[^. \t0-9]\.\w*|'
                               r'[^. \t0-9]->\w*|'
                               r'[a-zA-Z_]\w*::\w*')
+        self._retry_count = 0
 
     def get_complete_position(self, context):
         m = re.search(r'\w*$', context['input'])
@@ -28,71 +29,60 @@ class Source(Base):
     def gather_candidates(self, context):
         line = context['position'][1]
         col = (context['complete_position'] + 1)
+
         buf = self.vim.current.buffer
         buf_name = buf.name
         buf = buf[0:line]
         buf[-1] = buf[-1][0:col]
         text = "\n".join(buf)
 
-        command = self.get_rc_command(buf_name, line, col, len(text))
+        word = context['complete_str']
+
+        context['is_async'] = False
+
+        vars = self.vim.vars
+        timeout = vars.get('deoplete#source#rtags#timeout', None)
+        retry_count = vars.get('deoplete#source#rtags#retry', 10)
+
+        if context['is_refresh']:
+            self._retry_count = 0
+
+        command = self.get_rc_command(buf_name, line, col, len(text), word, timeout)
+        rc = None
         try:
-            p = Popen(command, stdout=PIPE, stdin=PIPE, stderr=PIPE)
-            stdout_data, stderr_data = p.communicate(input=text.encode("utf-8"), timeout=2)
+            p = Popen(command, stdout=PIPE, stdin=PIPE, stderr=PIPE, close_fds = True)
+            stdout_data, stderr_data = p.communicate(input=text.encode("utf-8"))
+            rc = p.returncode
         except:
             return []
 
-        stdout_data_decoded = stdout_data.decode("utf-8", 'ignore')  
-        if stdout_data_decoded == "":
+        if p.returncode != 0:
+            if p.returncode == 34: # rc timeout
+                self._retry_count += 1
+                if self._retry_count < retry_count:
+                    context['is_async'] = True
             return []
-        completions_json = json.loads(stdout_data_decoded)
-        completions = []
-        for raw_completion in completions_json['completions']:
-            completion = {'dup': 1}
-            if raw_completion['kind'] == "VarDecl":
-                completion['abbr'] = "[V] " + raw_completion['completion']
-                completion['word'] = raw_completion['completion']
-                completion['kind'] = raw_completion['kind']
-                completion['menu'] = raw_completion['brief_comment']
-            elif raw_completion['kind'] == "ParmDecl":
-                completion['kind'] = " ".join(raw_completion['signature'].split(" ")[:-1])
-                completion['word'] = raw_completion['completion']
-                completion['abbr'] = "[P] " + raw_completion['completion']
-                completion['menu'] = raw_completion['brief_comment']
-            elif raw_completion['kind'] == "FieldDecl":
-                completion['kind'] = " ".join(raw_completion['signature'].split(" ")[:-1])
-                completion['word'] = raw_completion['completion']
-                completion['abbr'] = "[S] " + raw_completion['completion']
-                completion['menu'] = raw_completion['brief_comment']
-            elif raw_completion['kind'] == "FunctionDecl":
-                completion['kind'] = raw_completion['signature']
-                completion['word'] = raw_completion['completion'] + "("
-                completion['abbr'] = "[F] " + raw_completion['completion'] + "("
-                completion['menu'] = raw_completion['brief_comment']
-            elif raw_completion['kind'] == "CXXMethod":
-                completion['kind'] = raw_completion['signature']
-                completion['word'] = raw_completion['completion'] + "("
-                completion['abbr'] = "[M] " + raw_completion['completion'] + "("
-                completion['menu'] = raw_completion['brief_comment']
-            elif raw_completion['kind'] == "NotImplemented":
-                completion['word'] = raw_completion['completion']
-                completion['abbr'] = "[K] " + raw_completion['completion']
-            else:
-                completion['word'] = raw_completion['completion']
-                completion['menu'] = raw_completion['brief_comment']
-                completion['kind'] = raw_completion['kind']
-            completions.append(completion)
 
+        if not stdout_data:
+            return []
+
+        self._retry_count = 0
+
+        stdout_data_decoded = stdout_data.decode("utf-8", 'ignore')  
+        completions = []
+        for line in stdout_data_decoded.splitlines():
+            completion = {'dup': 1}
+            line = line.rsplit(None, 1)[0]
+            completion['word'], completion['menu'], *_ = line.split(None, 1) + [None, None]
+            completions.append(completion) 
         return completions
 
-    def get_rc_command(self, file_name, line, column, offset):
-        # TODO change string to table
-        command = "rc --absolute-path --synchronous-completions"
-        command += " --json"
-        command += " -l {filename}:{line}:{column}"
-        command += " --unsaved-file={filename}:{offset}"
-        formated_command = command.format(filename=file_name,
-                                          line=line,
-                                          column=column,
-                                          offset=offset)
-
-        return formated_command.split(" ")
+    def get_rc_command(self, file_name, line, column, offset, word, timeout):
+        command = ["rc", "--absolute-path", "--synchronous-completions"]
+        if (timeout):
+            command.append("--timeout={}".format(timeout))
+        command += ["-l", "{}:{}:{}".format(file_name, line, column)]
+        if (word):
+            command.append("--code-complete-prefix={}".format(word))
+        command.append("--unsaved-file={}:{}".format(file_name, offset))
+        return command

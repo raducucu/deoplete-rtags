@@ -5,6 +5,15 @@ Use [deoplete.nvim](https://github.com/Shougo/deoplete.nvim) asynchronous
 autocompletion together with [rtags](https://github.com/Andersbakken/rtags)
 symbols database.
 
+## Done
+- Use rtags timeout and deopelet isAsyc to avoid blocking and for fallback to other sources if rtags fails.
+    - Added: `deoplete#source#rtags#timeout` and `deoplete#source#rtags#retry`
+- Don't use json, just get completes in one-liners
+- Use `--code-complete-prefix` _rc_ option.
+ 
+## TODOs
+- Find a way to talk dirrecly to _rdm_, skip spawning _rc_ process each time.
+
 ### Current project status:
 **Proof of concept** :boom:
 
